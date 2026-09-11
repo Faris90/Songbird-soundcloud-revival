@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Legacy SoundCloud Client</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background: #f4f4f4; 
+            color: #333; 
+        }
+        h1 { color: #ff5500; }
+        input[type="text"] { 
+            padding: 8px; 
+            width: 300px; 
+            font-size: 14px; 
+        }
+        button { 
+            background: #ff5500; 
+            color: #fff; 
+            border: none; 
+            padding: 8px 15px; 
+            cursor: pointer; 
+            font-weight: bold;
+        }
+        button:hover { background: #e04b00; }
+        #player-container { 
+            margin: 15px 0; 
+            padding: 15px; 
+            background: #fff; 
+            border: 1px solid #ccc; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1); 
+        }
+        .track { 
+            background: #fff; 
+            padding: 12px; 
+            margin-bottom: 8px; 
+            border: 1px solid #ddd; 
+            cursor: pointer; 
+            transition: background 0.2s;
+            overflow: hidden;
+        }
+        .track:hover { background: #fafafa; border-color: #ff5500; }
+        .track-art { float: left; width: 40px; height: 40px; margin-right: 12px; background: #ccc; }
+        .track-info { float: left; width: calc(100% - 60px); }
+        .track h3 { margin: 0 0 4px 0; font-size: 16px; color: #111; }
+        .track p { margin: 0; color: #666; font-size: 13px; }
+        #pagination-controls { margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>SoundCloud Legacy Player</h1>
+    
+    <!-- Search Input Area -->
+    <div>
+        <input type="text" id="search-box" value="electronic">
+        <button onclick="searchTracks()">Search</button>
+    </div>
+    
+    <!-- Persistent Player Bar -->
+    <div id="player-container" style="display: none;">
+        <div id="now-playing" style="margin-bottom: 8px; font-size: 14px;">Select a track to play</div>
+        <audio id="main-audio" controls style="width: 100%;">
+            Your browser does not support the audio element.
+        </audio>
+    </div>
+
+    <hr>
+    
+    <!-- Results & Pagination -->
+    <div id="results">Enter a search query to begin.</div>
+    
+    <div id="pagination-controls" style="display: none;">
+        <button onclick="loadMoreTracks()">Load More Tracks</button>
+    </div>
+
+    <script>
+        var currentQuery = '';
+        var currentOffset = 0;
+        var limit = 5;
+
+        // Legacy-compatible AJAX helper function (IE5+ supported)
+        function getJSON(url, callback) {
+            var xhr = window.XMLHttpRequest ? new XMLHttpRequest() : new ActiveXObject("Microsoft.XMLHTTP");
+            xhr.open('GET', url, true);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    if (xhr.status === 200) {
+                        callback(null, JSON.parse(xhr.responseText));
+                    } else {
+                        callback(xhr.status);
+                    }
+                }
+            };
+            xhr.send();
+        }
+
+        // Trigger a fresh search query
+        function searchTracks() {
+            currentQuery = document.getElementById('search-box').value;
+            currentOffset = 0;
+            document.getElementById('results').innerHTML = 'Loading tracks...';
+            document.getElementById('pagination-controls').style.display = 'none';
+            fetchTracks(false);
+        }
+
+        // Fetch next page batch
+        function loadMoreTracks() {
+            currentOffset += limit;
+            fetchTracks(true);
+        }
+
+        // Handle clicking a track card to play it in the persistent player
+        function playTrack(streamUrl, title, artist) {
+            var playerContainer = document.getElementById('player-container');
+            var nowPlaying = document.getElementById('now-playing');
+            var audioElement = document.getElementById('main-audio');
+
+            playerContainer.style.display = 'block';
+            nowPlaying.innerHTML = 'Now Playing: <strong>' + title + '</strong> by ' + artist;
+            
+            audioElement.src = streamUrl;
+            audioElement.play();
+        }
+
+        // Core data fetching function
+        function fetchTracks(isAppending) {
+            var url = '/api/tracks?q=' + encodeURIComponent(currentQuery) + '&offset=' + currentOffset;
+            
+            getJSON(url, function(err, data) {
+                var resultsDiv = document.getElementById('results');
+                if (err) {
+                    resultsDiv.innerHTML = 'Error loading tracks from server.';
+                    return;
+                }
+                
+                var html = isAppending ? resultsDiv.innerHTML : '';
+                
+                if (data.length === 0 && !isAppending) {
+                    resultsDiv.innerHTML = 'No tracks found.';
+                    return;
+                }
+
+                for (var i = 0; i < data.length; i++) {
+                    var track = data[i];
+                    
+                    // Locate a progressive audio transcoding format from API v2 response
+                    var transcodings = track.media && track.media.transcodings ? track.media.transcodings : [];
+                    var progressiveTranscoding = null;
+                    
+                    for (var j = 0; j < transcodings.length; j++) {
+                        if (transcodings[j].format.protocol === 'progressive') {
+                            progressiveTranscoding = transcodings[j];
+                            break;
+                        }
+                    }
+                    
+                    if (progressiveTranscoding) {
+                        var streamApiUrl = '/api/stream?url=' + encodeURIComponent(progressiveTranscoding.url) + '&auth=' + encodeURIComponent(track.track_authorization || '');
+                        
+                        // Sanitize single quotes to prevent injection breakages in inline onclick handlers
+                        var safeTitle = track.title.replace(/'/g, "\\'");
+                        var safeArtist = track.user.username.replace(/'/g, "\\'");
+                        var artworkUrl = track.artwork_url || track.user.avatar_url || 'https://a1.sndcdn.com/images/default_avatar_large.png';
+                        
+                        html += '<div class="track" onclick="playTrack(\'' + streamApiUrl + '\', \'' + safeTitle + '\', \'' + safeArtist + '\')">';
+                        html += '<img class="track-art" src="' + artworkUrl + '">';
+                        html += '<div class="track-info">';
+                        html += '<h3>' + track.title + '</h3>';
+                        html += '<p>Artist: ' + track.user.username + '</p>';
+                        html += '</div></div>';
+                    }
+                }
+                
+                resultsDiv.innerHTML = html;
+                
+                // Toggle pagination visibility based on whether items were fully returned
+                var paginationDiv = document.getElementById('pagination-controls');
+                if (data.length === limit) {
+                    paginationDiv.style.display = 'block';
+                } else {
+                    paginationDiv.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
