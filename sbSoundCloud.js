@@ -653,14 +653,11 @@ var username = item.user.username;
         var permalinkURL = item.permalink_url;
         var waveformURL = item.waveform_url;
         var downloadURL = item.download_url || "";
-        // REPLACE THIS OLD LINE:
-// var streamURL = SOCL_URL + "/api/stream?url=" + encodeURIComponent(item.media.transcodings[0].url);
-
-// WITH THIS NEW LOGIC:
-var transcodings = item.media.transcodings || [];
+// Inside _addItemsToLibrary in sbSoundCloud.js:
+var transcodings = item.media && item.media.transcodings ? item.media.transcodings : [];
 var selectedTranscoding = null;
 
-// Search for a progressive audio stream (MP3/AAC direct file)
+// Search for a progressive audio stream first, or fallback safely to HLS stream URLs
 for (let i = 0; i < transcodings.length; i++) {
   if (transcodings[i].format && transcodings[i].format.protocol === 'progressive') {
     selectedTranscoding = transcodings[i];
@@ -668,13 +665,11 @@ for (let i = 0; i < transcodings.length; i++) {
   }
 }
 
-// Fallback to index 0 only if progressive isn't explicitly found
 if (!selectedTranscoding && transcodings.length > 0) {
   selectedTranscoding = transcodings[0];
 }
 
 var streamURL = selectedTranscoding ? (SOCL_URL + "/api/stream?url=" + encodeURIComponent(selectedTranscoding.url)) : "";
-  
         if (downloadURL.indexOf(SOCL_URL) != -1)
           downloadURL += "?consumer_key=" + CONSUMER_KEY;
   

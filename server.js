@@ -9,6 +9,13 @@ const app = express();
 const PORT = 3636;
 const SOUNDCLOUD_CLIENT_ID = 'Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo';
 
+// --- Request Logging Middleware ---
+app.use((req, res, next) => {
+    const timestamp = new Date().toLocaleTimeString();
+    console.log(`[${timestamp}] ${req.method} request to ${req.originalUrl}`);
+    next();
+});
+
 // Ensure local audio cache directory exists
 const CACHE_DIR = path.join(__dirname, 'audio_cache');
 if (!fs.existsSync(CACHE_DIR)) {
@@ -16,24 +23,33 @@ if (!fs.existsSync(CACHE_DIR)) {
 }
 
 /**
- * 1. Tracks & Search Route
- * Fetches modern SoundCloud API v2 search results and returns them to Songbird.
+ * 1. Tracks & Search Route (API v2 with Browser Headers)
+ * Uses SoundCloud's API v2 search endpoint with a custom User-Agent to prevent 403 blocks.
  */
 app.get('/tracks.json', async (req, res) => {
     try {
         const searchQuery = req.query.q || 'trending';
+        console.log(`[Search] Querying SoundCloud for: "${searchQuery}"`);
+
         const response = await axios.get(`https://api-v2.soundcloud.com/search/tracks`, {
             params: {
                 q: searchQuery,
                 client_id: SOUNDCLOUD_CLIENT_ID,
                 limit: 50
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Referer': 'https://soundcloud.com/'
             }
         });
 
         const tracks = response.data.collection || response.data || [];
+        console.log(`[Search] Found ${tracks.length} tracks.`);
         res.json(tracks);
     } catch (error) {
-        console.error("[Search Error]:", error.message);
+        console.error("[Search Error]:", error.response?.data || error.message);
         res.status(500).json({ error: error.message });
     }
 });
@@ -92,22 +108,21 @@ app.get('/api/stream', async (req, res) => {
             ]);
 
             ffmpegProcess.on('close', (code, signal) => {
-    // If we killed it because the client disconnected, treat it as a clean exit
-    if (signal === 'SIGKILL' || code === null) {
-        console.log("[Stream] FFmpeg successfully terminated due to client disconnect.");
-        return;
-    }
+                if (signal === 'SIGKILL' || code === null) {
+                    console.log("[Stream] FFmpeg successfully terminated due to client disconnect.");
+                    return;
+                }
 
-    if (code === 0) {
-        console.log("[Transcode Complete] Serving track to Songbird.");
-        serveFile();
-    } else {
-        console.error(`[FFmpeg Error] Process exited with code ${code}`);
-        if (!res.headersSent) {
-            res.status(500).send('Transcoding failed');
-        }
-    }
-});
+                if (code === 0) {
+                    console.log("[Transcode Complete] Serving track to Songbird.");
+                    serveFile();
+                } else {
+                    console.error(`[FFmpeg Error] Process exited with code ${code}`);
+                    if (!res.headersSent) {
+                        res.status(500).send('Transcoding failed');
+                    }
+                }
+            });
 
             // Handle client aborting the request early
             req.on('close', () => {
