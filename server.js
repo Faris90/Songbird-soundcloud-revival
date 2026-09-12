@@ -92,26 +92,26 @@ app.get('/api/stream', async (req, res) => {
 
         console.log("[Cache Miss] Transcoding track before playback for full play/pause support...");
         const scResponse = await axios.get(targetUrl, {
-    headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Referer': 'https://soundcloud.com/'
-    },
-    validateStatus: function (status) { return status < 500; }
-});
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Referer': 'https://soundcloud.com/'
+            },
+            validateStatus: function (status) { return status < 500; }
+        });
 
         if (scResponse.data && scResponse.data.url) {
             const hlsPlaylistUrl = scResponse.data.url;
 
             // Spawn FFmpeg to fully convert and save the MP3 file locally
             const ffmpegProcess = spawn('ffmpeg', [
-    '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    '-i', hlsPlaylistUrl,
-    '-f', 'mp3',
-    '-ab', '192k',
-    '-acodec', 'libmp3lame',
-    filePath
-]);
+                '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                '-i', hlsPlaylistUrl,
+                '-f', 'mp3',
+                '-ab', '192k',
+                '-acodec', 'libmp3lame',
+                filePath
+            ]);
 
             ffmpegProcess.on('close', (code, signal) => {
                 if (signal === 'SIGKILL' || code === null) {
@@ -154,8 +154,7 @@ app.get('/api/stream', async (req, res) => {
 
 /**
  * 3. Image Proxy Route
- * Downloads album artwork securely via Node.js (bypassing outdated TLS/SSL 
- * limitations in Songbird) and forwards the binary buffer locally.
+ * Downloads album artwork securely via Node.js and forwards the binary buffer locally.
  */
 app.get('/api/image', async (req, res) => {
     try {
@@ -185,13 +184,62 @@ app.get('/api/image', async (req, res) => {
  * 4. Download Route
  * Transcodes and triggers a file attachment download for offline saving.
  */
-const scResponse = await axios.get(targetUrl, {
-    headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01', // Add this line
-        'Referer': 'https://soundcloud.com/'
-    },
-    validateStatus: function (status) { return status < 500; }
+app.get('/api/download', async (req, res) => {
+    try {
+        let targetUrl = req.query.url;
+        if (!targetUrl) {
+            return res.status(400).send('Missing target URL');
+        }
+
+        targetUrl = targetUrl.replace(/consumer_key=[^&]+/, `client_id=${SOUNDCLOUD_CLIENT_ID}`);
+        if (!targetUrl.includes('client_id=')) {
+            const separator = targetUrl.includes('?') ? '&' : '?';
+            targetUrl = `${targetUrl}${separator}client_id=${SOUNDCLOUD_CLIENT_ID}`;
+        }
+
+        const fileHash = crypto.createHash('md5').update(targetUrl).digest('hex');
+        const filePath = path.join(CACHE_DIR, `${fileHash}.mp3`);
+
+        if (fs.existsSync(filePath)) {
+            return res.download(filePath);
+        }
+
+        const scResponse = await axios.get(targetUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Referer': 'https://soundcloud.com/'
+            },
+            validateStatus: function (status) { return status < 500; }
+        });
+
+        if (scResponse.data && scResponse.data.url) {
+            const hlsPlaylistUrl = scResponse.data.url;
+            const ffmpegProcess = spawn('ffmpeg', [
+                '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                '-i', hlsPlaylistUrl,
+                '-f', 'mp3',
+                '-ab', '192k',
+                '-acodec', 'libmp3lame',
+                filePath
+            ]);
+
+            ffmpegProcess.on('close', (code) => {
+                if (code === 0) {
+                    res.download(filePath);
+                } else {
+                    res.status(500).send('Download transcoding failed');
+                }
+            });
+        } else {
+            res.status(404).json({ error: 'Could not resolve stream URL for download' });
+        }
+    } catch (error) {
+        console.error("[Download Error]:", error.message);
+        if (!res.headersSent) {
+            res.status(500).json({ error: error.message });
+        }
+    }
 });
 
 app.listen(PORT, () => {
