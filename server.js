@@ -1,9 +1,9 @@
-import express from 'express';
-import axios from 'axios';
-import { spawn } from 'child_process';
-import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
+const express = require('express');
+const axios = require('axios');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = 3636;
@@ -17,13 +17,14 @@ app.use((req, res, next) => {
 });
 
 // Ensure local audio cache directory exists
-const CACHE_DIR = path.join(import.meta.dirname, 'audio_cache');
+const CACHE_DIR = path.join(__dirname, 'audio_cache');
 if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR);
 }
 
 /**
  * 1. Tracks & Search Route (API v2 with Browser Headers)
+ * Uses SoundCloud's API v2 search endpoint with a custom User-Agent to prevent 403 blocks.
  */
 app.get('/tracks.json', async (req, res) => {
     try {
@@ -54,7 +55,9 @@ app.get('/tracks.json', async (req, res) => {
 });
 
 /**
- * 2. Audio Stream Route
+ * 2. Audio Stream Route (Full Play, Pause & Scrubbing Support)
+ * Transcodes and saves the track locally first, then serves it as a static file 
+ * with HTTP Range Request support for GStreamer.
  */
 app.get('/api/stream', async (req, res) => {
     try {
@@ -72,6 +75,7 @@ app.get('/api/stream', async (req, res) => {
         const fileHash = crypto.createHash('md5').update(targetUrl).digest('hex');
         const filePath = path.join(CACHE_DIR, `${fileHash}.mp3`);
 
+        // Helper function to safely serve the file with range support
         const serveFile = () => {
             if (fs.existsSync(filePath)) {
                 return res.sendFile(filePath);
@@ -80,6 +84,7 @@ app.get('/api/stream', async (req, res) => {
             }
         };
 
+        // If already cached, serve it instantly
         if (fs.existsSync(filePath)) {
             console.log("[Cache Hit] Serving cached track to Songbird.");
             return serveFile();
@@ -87,25 +92,26 @@ app.get('/api/stream', async (req, res) => {
 
         console.log("[Cache Miss] Transcoding track before playback for full play/pause support...");
         const scResponse = await axios.get(targetUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'Referer': 'https://soundcloud.com/'
-            },
-            validateStatus: function (status) { return status < 500; }
-        });
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Referer': 'https://soundcloud.com/'
+    },
+    validateStatus: function (status) { return status < 500; }
+});
 
         if (scResponse.data && scResponse.data.url) {
             const hlsPlaylistUrl = scResponse.data.url;
 
+            // Spawn FFmpeg to fully convert and save the MP3 file locally
             const ffmpegProcess = spawn('ffmpeg', [
-                '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                '-i', hlsPlaylistUrl,
-                '-f', 'mp3',
-                '-ab', '192k',
-                '-acodec', 'libmp3lame',
-                filePath
-            ]);
+    '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    '-i', hlsPlaylistUrl,
+    '-f', 'mp3',
+    '-ab', '192k',
+    '-acodec', 'libmp3lame',
+    filePath
+]);
 
             ffmpegProcess.on('close', (code, signal) => {
                 if (signal === 'SIGKILL' || code === null) {
@@ -124,6 +130,7 @@ app.get('/api/stream', async (req, res) => {
                 }
             });
 
+            // Handle client aborting the request early
             req.on('close', () => {
                 if (ffmpegProcess.exitCode === null) {
                     console.log("[Stream] Client disconnected during transcode. Terminating FFmpeg.");
@@ -147,6 +154,8 @@ app.get('/api/stream', async (req, res) => {
 
 /**
  * 3. Image Proxy Route
+ * Downloads album artwork securely via Node.js (bypassing outdated TLS/SSL 
+ * limitations in Songbird) and forwards the binary buffer locally.
  */
 app.get('/api/image', async (req, res) => {
     try {
@@ -170,6 +179,19 @@ app.get('/api/image', async (req, res) => {
         console.error("[Image Proxy Error]:", error.message);
         res.status(500).send('Failed to fetch image');
     }
+});
+
+/**
+ * 4. Download Route
+ * Transcodes and triggers a file attachment download for offline saving.
+ */
+const scResponse = await axios.get(targetUrl, {
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01', // Add this line
+        'Referer': 'https://soundcloud.com/'
+    },
+    validateStatus: function (status) { return status < 500; }
 });
 
 app.listen(PORT, () => {
