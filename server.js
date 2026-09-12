@@ -1,9 +1,9 @@
 import express from 'express';
 import axios from 'axios';
-const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
+import spawn from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 
 const app = express();
 const PORT = 3636;
