@@ -17,7 +17,7 @@ app.use((req, res, next) => {
 });
 
 // Ensure local audio cache directory exists
-const CACHE_DIR = path.join(__dirname, 'audio_cache');
+const CACHE_DIR = path.join(import.meta.dirname, 'audio_cache');
 if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR);
 }
