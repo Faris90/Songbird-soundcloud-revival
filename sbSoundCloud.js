@@ -58,7 +58,7 @@ const SB_PROPERTY_WAVEFORM = NS + "waveformURL";
 const SB_PROPERTY_DOWNLOAD_IMAGE = NS + "downloadImage";
 const SB_PROPERTY_DOWNLOAD_URL = NS + "downloadURL";
 
-const SOCL_URL = "http://localhost:3000";
+const SOCL_URL = "http://localhost:3636";
 const AUTH_PAGE = "chrome://soundcloud/content/soundcloudAuthorize.xul";
 const DEFAULT_AVATAR = "chrome://soundcloud/skin/default-avatar.png";
 const CONSUMER_SECRET = "dc347e54c22a9c8920258eedb9326821";
@@ -652,7 +652,9 @@ var username = item.user.username;
         var uri = item.uri;
         var permalinkURL = item.permalink_url;
         var waveformURL = item.waveform_url;
-        var downloadURL = item.download_url || "";
+       var downloadURL = selectedTranscoding 
+  ? (SOCL_URL + "/api/download?url=" + encodeURIComponent(selectedTranscoding.url) + "&title=" + encodeURIComponent(title)) 
+  : "";
 // Inside _addItemsToLibrary in sbSoundCloud.js:
 var transcodings = item.media && item.media.transcodings ? item.media.transcodings : [];
 var selectedTranscoding = null;
@@ -670,8 +672,8 @@ if (!selectedTranscoding && transcodings.length > 0) {
 }
 
 var streamURL = selectedTranscoding ? (SOCL_URL + "/api/stream?url=" + encodeURIComponent(selectedTranscoding.url)) : "";
-        if (downloadURL.indexOf(SOCL_URL) != -1)
-          downloadURL += "?consumer_key=" + CONSUMER_KEY;
+        //if (downloadURL.indexOf(SOCL_URL) != -1)
+          //downloadURL += "?consumer_key=" + CONSUMER_KEY;
   
         if (!streamURL || streamURL.indexOf(SOCL_URL) == -1)
           continue;
